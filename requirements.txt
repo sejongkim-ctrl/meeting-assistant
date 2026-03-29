@@ -1,0 +1,13 @@
+streamlit>=1.37
+sounddevice>=0.4.6
+numpy>=1.24
+google-genai>=1.0
+python-dotenv>=1.0
+streamlit-webrtc>=0.47
+faster-whisper>=1.0
+pyannote.audio>=3.1
+torch>=2.0
+
+# Optional STT engines (uncomment if needed)
+# openai>=1.0
+# groq>=0.4
