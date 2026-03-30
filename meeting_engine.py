@@ -14,7 +14,10 @@ import numpy as np
 from datetime import datetime
 from typing import Optional, Generator
 
-import sounddevice as sd
+try:
+    import sounddevice as sd
+except ImportError:
+    sd = None  # Cloud/Docker 환경: sounddevice 미설치 시 graceful fallback
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
