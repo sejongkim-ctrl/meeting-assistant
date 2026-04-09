@@ -44,15 +44,18 @@ async def ws_audio(websocket: WebSocket):
     transcript_segments: list[dict] = []
 
     async def _transcribe_chunk(chunk_bytes: bytes, time_str: str) -> None:
-        wav_bytes = _pcm_to_wav(chunk_bytes)
-        loop = asyncio.get_event_loop()
-        text = await loop.run_in_executor(None, transcriber.transcribe, wav_bytes)
-        if text:
-            seg = {"text": text, "speaker": "", "time": time_str}
-            transcript_segments.append(seg)
-            await manager.broadcast(
-                {"type": "transcript", "text": text, "speaker": "", "time": time_str}
-            )
+        try:
+            wav_bytes = _pcm_to_wav(chunk_bytes)
+            loop = asyncio.get_running_loop()
+            text = await loop.run_in_executor(None, transcriber.transcribe, wav_bytes)
+            if text:
+                seg = {"text": text, "speaker": "", "time": time_str}
+                transcript_segments.append(seg)
+                await manager.broadcast(
+                    {"type": "transcript", "text": text, "speaker": "", "time": time_str}
+                )
+        except Exception as e:
+            print(f"[audio_ws] transcribe error at {time_str}: {e}", file=sys.stderr)
 
     try:
         while True:

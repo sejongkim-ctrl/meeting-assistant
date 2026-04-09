@@ -37,10 +37,15 @@ if '_receiver_ref' not in globals() or not hasattr(_receiver_ref, 'receiver'):
 def _audio_frame_callback(frame):
     """WebRTC 오디오 프레임을 BrowserAudioReceiver로 전달."""
     _receiver_ref.frame_count += 1
-    if _receiver_ref.receiver is None:
+    receiver = _receiver_ref.receiver
+    if receiver is None:
         return frame
     try:
-        audio = frame.to_ndarray().flatten().astype(np.float32)
+        raw = frame.to_ndarray()
+        # 스테레오 → 모노 변환 (채널 평균)
+        if raw.ndim == 2:
+            raw = raw.mean(axis=0)
+        audio = raw.flatten().astype(np.float32)
         # int16 → float32 정규화
         if np.abs(audio).max() > 1.0:
             audio = audio / 32768.0
@@ -55,9 +60,10 @@ def _audio_frame_callback(frame):
                     np.linspace(0, len(audio) - 1, target_len),
                     np.arange(len(audio)), audio,
                 ).astype(np.float32)
-        _receiver_ref.receiver.push_audio(audio)
-    except Exception:
-        pass
+        receiver.push_audio(audio)
+    except Exception as e:
+        import sys
+        print(f"[audio_callback] frame={_receiver_ref.frame_count} sr={frame.sample_rate} err={e}", file=sys.stderr)
     return frame
 
 
@@ -238,7 +244,8 @@ with st.sidebar:
         st.caption(f"전사 구간: {len(engine.get_transcript_segments())}개")
         # 브라우저 마이크 디버그 정보
         if getattr(engine, "audio_source", "local") == "browser":
-            st.caption(f"WebRTC 프레임: {_receiver_ref.frame_count}개")
+            receiver_ok = "✅ 연결됨" if _receiver_ref.receiver is not None else "❌ None"
+            st.caption(f"WebRTC 수신기: {receiver_ok} / 프레임: {_receiver_ref.frame_count}개")
             st.caption(f"VAD 연속실패: {engine._consecutive_vad_failures}회")
             buf_size = 0
             if hasattr(engine.recorder, '_buffer'):
@@ -380,6 +387,12 @@ with col_ctrl2:
     def show_timer():
         if not st.session_state.engine:
             return
+        # 브라우저 마이크 모드: fragment 재실행마다 receiver 참조를 재연결.
+        # 메인 스크립트 rerun과 무관하게 1초마다 유효한 참조를 보장한다.
+        if (st.session_state.is_recording
+                and getattr(st.session_state.engine, "audio_source", "local") == "browser"
+                and _receiver_ref.receiver is None):
+            _receiver_ref.receiver = st.session_state.engine.recorder
         elapsed = st.session_state.engine.get_elapsed_time()
         status = st.session_state.engine.status
         st.metric("경과 시간", elapsed)
