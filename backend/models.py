@@ -109,3 +109,16 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     content: str
+
+
+# --- Search / Share ---
+
+class NoteSearchResult(BaseModel):
+    id: int
+    title: str
+    snippet: str
+    updated_at: str
+
+
+class ShareResponse(BaseModel):
+    share_token: str

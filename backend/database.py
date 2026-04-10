@@ -48,3 +48,16 @@ async def create_tables():
         except sqlite3.OperationalError as e:
             if "duplicate column" not in str(e).lower():
                 raise
+        # Migration: add share_token column if not present
+        try:
+            await db.execute("ALTER TABLE notes ADD COLUMN share_token TEXT")
+            await db.commit()
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
+        # FTS5 virtual table for full-text search
+        await db.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts
+            USING fts5(title, summary, transcript_text, note_id UNINDEXED, content='', contentless_delete=1)
+        """)
+        await db.commit()

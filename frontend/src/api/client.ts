@@ -1,4 +1,4 @@
-import type { Folder, Note, RecordingStatus, DocTemplate, TranscriptSegment, RawSegment, ChatMsg } from '../types'
+import type { Folder, Note, RecordingStatus, DocTemplate, TranscriptSegment, RawSegment, ChatMsg, NoteSearchResult } from '../types'
 
 const BASE = '/api'
 
@@ -56,3 +56,19 @@ export const chatWithNote = (noteId: number, messages: ChatMsg[]) =>
     method: 'POST',
     body: JSON.stringify({ note_id: noteId, messages }),
   })
+
+// Search notes
+export const searchNotes = (q: string) =>
+  req<NoteSearchResult[]>(`/notes/search?q=${encodeURIComponent(q)}`)
+
+// Share note → returns { share_token: string }
+export const shareNote = (id: number) =>
+  req<{ share_token: string }>(`/notes/${id}/share`, { method: 'POST' })
+
+// Unshare note
+export const unshareNote = (id: number) =>
+  fetch(`/api/notes/${id}/share`, { method: 'DELETE' }).then(() => {})
+
+// Get shared note by token
+export const getSharedNote = (token: string) =>
+  req<Note>(`/shared/${token}`)

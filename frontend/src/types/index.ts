@@ -21,6 +21,7 @@ export interface Note {
   generated_docs: Record<string, string> | null
   created_at: string
   updated_at: string
+  share_token?: string | null
 }
 
 export interface TranscriptSegment {
@@ -47,6 +48,7 @@ export type DocTemplate =
   | 'agm'
   | 'sales'
   | 'interview'
+  | 'action_items'
   | 'free'
 
 export interface WsMessage {
@@ -65,4 +67,11 @@ export interface WsMessage {
 export interface ChatMsg {
   role: 'user' | 'assistant'
   content: string
+}
+
+export interface NoteSearchResult {
+  id: number
+  title: string
+  snippet: string
+  updated_at: string
 }

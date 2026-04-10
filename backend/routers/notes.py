@@ -8,9 +8,12 @@ from fastapi import APIRouter, Depends, HTTPException
 import aiosqlite
 
 from backend.database import get_db
+import uuid as _uuid
+
 from backend.models import (
     FolderCreate, FolderOut,
     NoteCreate, NoteUpdate, NoteOut,
+    NoteSearchResult, ShareResponse,
 )
 
 router = APIRouter()
@@ -107,9 +110,66 @@ async def create_note(body: NoteCreate, db: aiosqlite.Connection = Depends(get_d
     ) as cursor:
         note_id = cursor.lastrowid
     await db.commit()
+    # FTS sync
+    transcript_text = ""
+    if body.transcript:
+        segs = body.transcript if isinstance(body.transcript, list) else []
+        transcript_text = " ".join(s.get("text", "") if isinstance(s, dict) else "" for s in segs)
+    await db.execute(
+        "INSERT INTO notes_fts(rowid, title, summary, transcript_text, note_id) VALUES (?, ?, ?, ?, ?)",
+        (note_id, body.title, body.summary or "", transcript_text, note_id),
+    )
+    await db.commit()
     async with db.execute("SELECT * FROM notes WHERE id = ?", (note_id,)) as cursor:
         row = await cursor.fetchone()
     return _row_to_note(row)
+
+
+@router.get("/notes/search", response_model=list[NoteSearchResult])
+async def search_notes(q: str = "", db: aiosqlite.Connection = Depends(get_db)):
+    if not q.strip():
+        return []
+    fts_query = q.strip()
+    async with db.execute(
+        """SELECT n.id, n.title, n.summary, n.transcript, n.updated_at
+           FROM notes n
+           WHERE n.id IN (
+               SELECT note_id FROM notes_fts WHERE notes_fts MATCH ?
+           )
+           ORDER BY n.updated_at DESC
+           LIMIT 20""",
+        (fts_query,),
+    ) as cursor:
+        rows = await cursor.fetchall()
+
+    results = []
+    for row in rows:
+        snippet = ""
+        if row["summary"]:
+            idx = row["summary"].lower().find(q.lower())
+            if idx >= 0:
+                start = max(0, idx - 30)
+                end = min(len(row["summary"]), idx + 70)
+                snippet = ("..." if start > 0 else "") + row["summary"][start:end] + ("..." if end < len(row["summary"]) else "")
+            else:
+                snippet = row["summary"][:100]
+        elif row["transcript"]:
+            try:
+                segs_raw = row["transcript"]
+                segs = json.loads(segs_raw) if isinstance(segs_raw, str) else segs_raw
+                if isinstance(segs, list):
+                    full_text = " ".join(s.get("text", "") for s in segs)
+                    idx = full_text.lower().find(q.lower())
+                    if idx >= 0:
+                        start = max(0, idx - 30)
+                        end = min(len(full_text), idx + 70)
+                        snippet = ("..." if start > 0 else "") + full_text[start:end] + ("..." if end < len(full_text) else "")
+                    else:
+                        snippet = full_text[:100]
+            except Exception:
+                snippet = ""
+        results.append(NoteSearchResult(id=row["id"], title=row["title"], snippet=snippet, updated_at=row["updated_at"]))
+    return results
 
 
 @router.get("/notes/{note_id}", response_model=NoteOut)
@@ -150,6 +210,25 @@ async def update_note(note_id: int, body: NoteUpdate, db: aiosqlite.Connection =
     await db.execute(f"UPDATE notes SET {set_clause} WHERE id = ?", values)
     await db.commit()
 
+    # FTS re-sync
+    async with db.execute("SELECT title, summary, transcript FROM notes WHERE id = ?", (note_id,)) as cur:
+        updated = await cur.fetchone()
+    try:
+        segs_raw = updated["transcript"]
+        if segs_raw:
+            segs = json.loads(segs_raw) if isinstance(segs_raw, str) else segs_raw
+            t_text = " ".join(s.get("text", "") for s in segs if isinstance(s, dict))
+        else:
+            t_text = ""
+    except Exception:
+        t_text = ""
+    await db.execute("DELETE FROM notes_fts WHERE note_id = ?", (note_id,))
+    await db.execute(
+        "INSERT INTO notes_fts(rowid, title, summary, transcript_text, note_id) VALUES (?, ?, ?, ?, ?)",
+        (note_id, updated["title"], updated["summary"] or "", t_text, note_id),
+    )
+    await db.commit()
+
     async with db.execute("SELECT * FROM notes WHERE id = ?", (note_id,)) as cursor:
         row = await cursor.fetchone()
     return _row_to_note(row)
@@ -161,5 +240,41 @@ async def delete_note(note_id: int, db: aiosqlite.Connection = Depends(get_db)):
         existing = await cursor.fetchone()
     if existing is None:
         raise HTTPException(status_code=404, detail="Note not found")
+    await db.execute("DELETE FROM notes_fts WHERE note_id = ?", (note_id,))
     await db.execute("DELETE FROM notes WHERE id = ?", (note_id,))
     await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Share
+# ---------------------------------------------------------------------------
+
+@router.post("/notes/{note_id}/share", response_model=ShareResponse)
+async def share_note(note_id: int, db: aiosqlite.Connection = Depends(get_db)):
+    async with db.execute("SELECT id, share_token FROM notes WHERE id = ?", (note_id,)) as cursor:
+        row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    token = row["share_token"] or str(_uuid.uuid4())
+    await db.execute("UPDATE notes SET share_token = ? WHERE id = ?", (token, note_id))
+    await db.commit()
+    return ShareResponse(share_token=token)
+
+
+@router.delete("/notes/{note_id}/share", status_code=204)
+async def unshare_note(note_id: int, db: aiosqlite.Connection = Depends(get_db)):
+    async with db.execute("SELECT id FROM notes WHERE id = ?", (note_id,)) as cursor:
+        row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    await db.execute("UPDATE notes SET share_token = NULL WHERE id = ?", (note_id,))
+    await db.commit()
+
+
+@router.get("/shared/{token}", response_model=NoteOut)
+async def get_shared_note(token: str, db: aiosqlite.Connection = Depends(get_db)):
+    async with db.execute("SELECT * FROM notes WHERE share_token = ?", (token,)) as cursor:
+        row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Shared note not found")
+    return _row_to_note(row)

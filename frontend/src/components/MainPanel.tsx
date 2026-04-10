@@ -11,6 +11,7 @@ interface Props {
   summaryJustReady: boolean
   onRefresh: () => void
   onSummaryRead: () => void
+  readOnly?: boolean
 }
 
 type Tab = 'live' | 'summary' | 'script' | 'doc'
@@ -23,6 +24,7 @@ const TEMPLATES: { key: DocTemplate; label: string; icon: string }[] = [
   { key: 'agm', label: '주주총회', icon: '🏛' },
   { key: 'sales', label: '세일즈노트', icon: '💼' },
   { key: 'interview', label: '채용인터뷰', icon: '👤' },
+  { key: 'action_items' as DocTemplate, label: '액션 아이템', icon: '✅' },
   { key: 'free', label: '자유형식', icon: '✨' },
 ]
 
@@ -57,7 +59,7 @@ function DownloadButton({ text, filename }: { text: string; filename: string }) 
   )
 }
 
-export default function MainPanel({ note, liveLines, summaryLoading, summaryJustReady, onRefresh, onSummaryRead }: Props) {
+export default function MainPanel({ note, liveLines, summaryLoading, summaryJustReady, onRefresh, onSummaryRead, readOnly }: Props) {
   const [tab, setTab] = useState<Tab>('live')
   const [script, setScript] = useState<TranscriptSegment[]>([])
   const [docText, setDocText] = useState('')
@@ -205,9 +207,22 @@ export default function MainPanel({ note, liveLines, summaryLoading, summaryJust
         <div className="welcome-state">
           <div className="welcome-icon">🎙️</div>
           <h2 className="welcome-title">AI 회의록 어시스턴트</h2>
-          <p className="welcome-desc">
-            왼쪽에서 노트를 선택하거나 새로 만드세요.<br />
-            녹음 시작 버튼을 누르면 자동으로 전사·요약합니다.
+          <div className="welcome-steps">
+            <div className="welcome-step">
+              <span className="step-num">1</span>
+              <span>왼쪽 <strong>+</strong> 버튼으로 새 노트를 만드세요</span>
+            </div>
+            <div className="welcome-step">
+              <span className="step-num">2</span>
+              <span>하단 <strong>녹음 시작</strong>을 누르면 자동 전사됩니다</span>
+            </div>
+            <div className="welcome-step">
+              <span className="step-num">3</span>
+              <span>녹음 완료 후 <strong>AI 요약</strong>이 자동 생성됩니다</span>
+            </div>
+          </div>
+          <p className="welcome-shortcuts">
+            단축키: <kbd>Space</kbd> 녹음 · <kbd>⌘K</kbd> 검색 · <kbd>⌘N</kbd> 새 노트
           </p>
         </div>
       </main>
@@ -244,7 +259,7 @@ export default function MainPanel({ note, liveLines, summaryLoading, summaryJust
               }}
             />
           ) : (
-            <h2 className="note-title" onClick={handleTitleEdit} title="클릭하여 제목 편집">
+            <h2 className="note-title" onClick={readOnly ? undefined : handleTitleEdit} title={readOnly ? undefined : '클릭하여 제목 편집'}>
               {note.title}
               <span className="title-edit-hint">✎</span>
             </h2>
@@ -349,9 +364,11 @@ export default function MainPanel({ note, liveLines, summaryLoading, summaryJust
         {tab === 'script' && (
           <div className="script-tab">
             <div className="script-actions">
-              <button className="action-btn" onClick={handlePostprocess}>
-                화자 분리 실행
-              </button>
+              {!readOnly && (
+                <button className="action-btn" onClick={handlePostprocess}>
+                  화자 분리 실행
+                </button>
+              )}
             </div>
             {(note.diarized_script?.length ?? 0) > 0 || script.length > 0 ? null : (
               <p className="empty-hint">화자 분리를 실행하면 발화자별 스크립트가 표시됩니다.</p>

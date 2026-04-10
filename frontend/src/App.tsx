@@ -3,14 +3,25 @@ import NoteList from './components/NoteList'
 import MainPanel from './components/MainPanel'
 import ChatPanel from './components/ChatPanel'
 import BottomBar from './components/BottomBar'
+import ToastContainer from './components/Toast'
+import ErrorBoundary from './components/ErrorBoundary'
+import SharedView from './components/SharedView'
 import { useNotes } from './hooks/useNotes'
 import { useBrowserRecording } from './hooks/useBrowserRecording'
 import { useWebSocket } from './hooks/useWebSocket'
+import { useToast } from './hooks/useToast'
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { updateNote, deleteNote, generateDoc } from './api/client'
 import type { WsMessage } from './types'
 import './index.css'
 
 export default function App() {
+  const { toasts, showToast, hideToast } = useToast()
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
+
+  // 공유 모드 감지
+  const shareToken = new URLSearchParams(window.location.search).get('share')
+
   const {
     folders, notes, selectedFolderId, selectedNoteId, selectedNote,
     selectFolder, selectNote, addNote, removeNote, refreshNotes,
@@ -40,6 +51,7 @@ export default function App() {
           generated_docs: { summary: res.content },
         })
         setSummaryReady(noteId)
+        showToast('회의 요약이 완료됐습니다', 'success')
         await refreshNotes()
       }
     } catch (e) {
@@ -95,40 +107,60 @@ export default function App() {
     removeNote(id)
     if (selectedNoteId === id) selectNote(null)
     await deleteNote(id)
-  }, [removeNote, selectedNoteId, selectNote])
+    showToast('노트가 삭제됐습니다', 'info')
+  }, [removeNote, selectedNoteId, selectNote, showToast])
 
   const handleStop = useCallback(async () => {
     await stop()
   }, [stop])
 
+  useKeyboardShortcuts(
+    {
+      onToggleRecording: isRecording ? handleStop : handleStart,
+      onFocusSearch: () => searchInputRef.current?.focus(),
+      onNewNote: () => {},
+    },
+    isRecording,
+    searchInputRef,
+  )
+
   return (
-    <div className="app-root">
-      <NoteList
-        folders={folders}
-        notes={notes}
-        selectedFolderId={selectedFolderId}
-        selectedNoteId={selectedNoteId}
-        onSelectFolder={selectFolder}
-        onSelectNote={selectNote}
-        onAddNote={handleAddNote}
-        onDeleteNote={handleDeleteNote}
-      />
-      <MainPanel
-        note={selectedNote}
-        liveLines={liveLines}
-        summaryLoading={summaryLoading === selectedNote?.id}
-        summaryJustReady={summaryReady === selectedNote?.id}
-        onRefresh={refreshNotes}
-        onSummaryRead={() => setSummaryReady(null)}
-      />
-      <ChatPanel note={selectedNote} />
-      <BottomBar
-        isRecording={isRecording}
-        durationStr={durationStr}
-        noteTitle={selectedNote?.title ?? null}
-        onStart={handleStart}
-        onStop={handleStop}
-      />
-    </div>
+    <ErrorBoundary>
+      {shareToken ? (
+        <SharedView token={shareToken} />
+      ) : (
+        <div className="app-root">
+          <NoteList
+            folders={folders}
+            notes={notes}
+            selectedFolderId={selectedFolderId}
+            selectedNoteId={selectedNoteId}
+            onSelectFolder={selectFolder}
+            onSelectNote={selectNote}
+            onAddNote={handleAddNote}
+            onDeleteNote={handleDeleteNote}
+            onShowToast={showToast}
+            searchInputRef={searchInputRef}
+          />
+          <MainPanel
+            note={selectedNote}
+            liveLines={liveLines}
+            summaryLoading={summaryLoading === selectedNote?.id}
+            summaryJustReady={summaryReady === selectedNote?.id}
+            onRefresh={refreshNotes}
+            onSummaryRead={() => setSummaryReady(null)}
+          />
+          <ChatPanel note={selectedNote} />
+          <BottomBar
+            isRecording={isRecording}
+            durationStr={durationStr}
+            noteTitle={selectedNote?.title ?? null}
+            onStart={handleStart}
+            onStop={handleStop}
+          />
+        </div>
+      )}
+      <ToastContainer toasts={toasts} onHide={hideToast} />
+    </ErrorBoundary>
   )
 }
