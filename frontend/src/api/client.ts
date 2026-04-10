@@ -1,4 +1,4 @@
-import type { Folder, Note, RecordingStatus, DocTemplate, TranscriptSegment, RawSegment } from '../types'
+import type { Folder, Note, RecordingStatus, DocTemplate, TranscriptSegment, RawSegment, ChatMsg } from '../types'
 
 const BASE = '/api'
 
@@ -22,8 +22,10 @@ export const getNotes = (folderId?: number) =>
 export const getNote = (id: number) => req<Note>(`/notes/${id}`)
 export const createNote = (title: string, folder_id?: number) =>
   req<Note>('/notes', { method: 'POST', body: JSON.stringify({ title, folder_id }) })
-export const updateNote = (id: number, data: Partial<Pick<Note, 'title' | 'summary' | 'transcript' | 'wav_path' | 'generated_docs'>>) =>
-  req<Note>(`/notes/${id}`, { method: 'PUT', body: JSON.stringify(data) })
+export const updateNote = (
+  id: number,
+  data: Partial<Pick<Note, 'title' | 'summary' | 'transcript' | 'diarized_script' | 'wav_path' | 'generated_docs'>>
+) => req<Note>(`/notes/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 export const deleteNote = (id: number) =>
   req<{ ok: boolean }>(`/notes/${id}`, { method: 'DELETE' })
 
@@ -46,4 +48,11 @@ export const generateDoc = (noteId: number, template: DocTemplate) =>
   req<{ content: string }>('/generate', {
     method: 'POST',
     body: JSON.stringify({ note_id: noteId, template }),
+  })
+
+// Chat Q&A about a note
+export const chatWithNote = (noteId: number, messages: ChatMsg[]) =>
+  req<{ content: string }>('/chat', {
+    method: 'POST',
+    body: JSON.stringify({ note_id: noteId, messages }),
   })

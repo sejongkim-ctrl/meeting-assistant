@@ -92,3 +92,20 @@ class GenerateRequest(BaseModel):
 
 class GenerateResult(BaseModel):
     content: str
+
+
+# --- Chat ---
+
+class ChatMessage(BaseModel):
+    role: str  # "user" | "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    note_id: int
+    messages: list[ChatMessage]
+    api_key: Optional[str] = None
+
+
+class ChatResponse(BaseModel):
+    content: str

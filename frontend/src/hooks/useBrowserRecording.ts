@@ -49,9 +49,10 @@ export function useBrowserRecording(noteId: number | null) {
     if (isRecordingRef.current) stop()
   }, [noteId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const start = useCallback(async () => {
-    if (!noteId) return
-    recordingNoteIdRef.current = noteId
+  const start = useCallback(async (noteIdOverride?: number) => {
+    const effectiveNoteId = noteIdOverride ?? noteId
+    if (!effectiveNoteId) return
+    recordingNoteIdRef.current = effectiveNoteId
 
     let stream: MediaStream
     try {

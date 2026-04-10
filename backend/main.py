@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.database import create_tables
 from backend.ws_manager import manager
-from backend.routers import notes, recording, postprocess, generate, audio_ws
+from backend.routers import notes, recording, postprocess, generate, audio_ws, chat
 
 
 @asynccontextmanager
@@ -41,6 +41,7 @@ app.include_router(notes.router, prefix="/api")
 app.include_router(recording.router, prefix="/api/recording")
 app.include_router(postprocess.router, prefix="/api/postprocess")
 app.include_router(generate.router, prefix="/api/generate")
+app.include_router(chat.router, prefix="/api")
 app.include_router(audio_ws.router)
 
 

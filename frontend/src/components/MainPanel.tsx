@@ -1,31 +1,66 @@
 import { useState, useEffect, useRef } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import type { Note, TranscriptSegment, DocTemplate } from '../types'
 import { runPostprocess, generateDoc, updateNote } from '../api/client'
 
 interface Props {
   note: Note | null
   liveLines: string[]
+  summaryLoading: boolean
+  summaryJustReady: boolean
   onRefresh: () => void
+  onSummaryRead: () => void
 }
 
-type Tab = 'live' | 'script' | 'doc'
+type Tab = 'live' | 'summary' | 'script' | 'doc'
 
-const TEMPLATES: { key: DocTemplate; label: string }[] = [
-  { key: 'summary', label: '한페이지 요약' },
-  { key: 'minutes', label: '회의록' },
-  { key: 'lecture', label: '강의노트' },
-  { key: 'ir', label: 'IR·피칭' },
-  { key: 'agm', label: '주주총회' },
-  { key: 'sales', label: '세일즈노트' },
-  { key: 'interview', label: '채용인터뷰' },
-  { key: 'free', label: '자유형식' },
+const TEMPLATES: { key: DocTemplate; label: string; icon: string }[] = [
+  { key: 'summary', label: '한페이지 요약', icon: '📋' },
+  { key: 'minutes', label: '회의록', icon: '📝' },
+  { key: 'lecture', label: '강의노트', icon: '📚' },
+  { key: 'ir', label: 'IR·피칭', icon: '📊' },
+  { key: 'agm', label: '주주총회', icon: '🏛' },
+  { key: 'sales', label: '세일즈노트', icon: '💼' },
+  { key: 'interview', label: '채용인터뷰', icon: '👤' },
+  { key: 'free', label: '자유형식', icon: '✨' },
 ]
 
-export default function MainPanel({ note, liveLines, onRefresh }: Props) {
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  return (
+    <button className="doc-action-btn" onClick={handleCopy}>
+      {copied ? '✓ 복사됨' : '복사'}
+    </button>
+  )
+}
+
+function DownloadButton({ text, filename }: { text: string; filename: string }) {
+  const handleDownload = () => {
+    const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+  return (
+    <button className="doc-action-btn" onClick={handleDownload}>
+      ⬇ MD
+    </button>
+  )
+}
+
+export default function MainPanel({ note, liveLines, summaryLoading, summaryJustReady, onRefresh, onSummaryRead }: Props) {
   const [tab, setTab] = useState<Tab>('live')
   const [script, setScript] = useState<TranscriptSegment[]>([])
   const [docText, setDocText] = useState('')
-  const [loading, setLoading] = useState(false)
   const [docError, setDocError] = useState('')
   const [generatingDoc, setGeneratingDoc] = useState(false)
   const [generatingLabel, setGeneratingLabel] = useState('')
@@ -34,19 +69,49 @@ export default function MainPanel({ note, liveLines, onRefresh }: Props) {
   const [savedDocs, setSavedDocs] = useState<Record<string, string>>({})
   const [activeDocKey, setActiveDocKey] = useState<string | null>(null)
 
-  // note 전환 시 저장된 문서 히스토리 로드
+  // Inline title editing
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
+  const titleInputRef = useRef<HTMLInputElement>(null)
+
+  // Typing animation
+  const [typingCharCount, setTypingCharCount] = useState(0)
+  const typingIndexRef = useRef(-1)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Auto-switch to summary tab when auto-summary is ready
+  useEffect(() => {
+    if (summaryJustReady) {
+      setTab('summary')
+      onSummaryRead()
+    }
+  }, [summaryJustReady, onSummaryRead])
+
+  // Reset state when note changes
   useEffect(() => {
     setSavedDocs(note?.generated_docs ?? {})
     setActiveDocKey(null)
     setDocText('')
     setDocError('')
-  }, [note?.id])
+    setEditingTitle(false)
+    // If note has a summary, pre-select summary tab
+    if (note?.summary) {
+      setTab('summary')
+    } else if (note?.transcript?.length) {
+      setTab('live')
+    } else {
+      setTab('live')
+    }
+  }, [note?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 타이핑 애니메이션 state
-  const [typingCharCount, setTypingCharCount] = useState(0)
-  const typingIndexRef = useRef(-1)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // Sync saved docs from note
+  useEffect(() => {
+    if (note?.generated_docs) {
+      setSavedDocs(note.generated_docs)
+    }
+  }, [note?.generated_docs])
 
+  // Typing animation for live transcript
   useEffect(() => {
     if (liveLines.length === 0) {
       typingIndexRef.current = -1
@@ -54,7 +119,7 @@ export default function MainPanel({ note, liveLines, onRefresh }: Props) {
       return
     }
     const lastIdx = liveLines.length - 1
-    if (typingIndexRef.current === lastIdx) return // 이미 애니메이션 중
+    if (typingIndexRef.current === lastIdx) return
     typingIndexRef.current = lastIdx
     setTypingCharCount(0)
     if (timerRef.current) clearInterval(timerRef.current)
@@ -71,16 +136,31 @@ export default function MainPanel({ note, liveLines, onRefresh }: Props) {
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [liveLines])
 
+  const handleTitleEdit = () => {
+    if (!note) return
+    setTitleDraft(note.title)
+    setEditingTitle(true)
+    setTimeout(() => titleInputRef.current?.select(), 30)
+  }
+
+  const handleTitleSave = async () => {
+    if (!note || !titleDraft.trim()) { setEditingTitle(false); return }
+    setEditingTitle(false)
+    if (titleDraft.trim() !== note.title) {
+      await updateNote(note.id, { title: titleDraft.trim() })
+      onRefresh()
+    }
+  }
+
   const handlePostprocess = async () => {
     if (!note) return
-    setLoading(true)
     try {
       const res = await runPostprocess(note.id)
       setScript(res.script)
       setTab('script')
       onRefresh()
-    } finally {
-      setLoading(false)
+    } catch (e) {
+      alert('화자 분리 실패: ' + (e instanceof Error ? e.message : String(e)))
     }
   }
 
@@ -108,7 +188,6 @@ export default function MainPanel({ note, liveLines, onRefresh }: Props) {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e)
       setDocError(msg)
-      setTab('doc')
     } finally {
       if (progressTimerRef.current) { clearInterval(progressTimerRef.current); progressTimerRef.current = null }
       setDocProgress(100)
@@ -120,50 +199,84 @@ export default function MainPanel({ note, liveLines, onRefresh }: Props) {
     }
   }
 
-  const handleDownload = () => {
-    const content = activeDocKey ? (savedDocs[activeDocKey] ?? '') : docText
-    if (!content || !note) return
-    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${note.title}.md`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
   if (!note) {
     return (
       <main className="main-panel empty-panel">
-        <p>왼쪽에서 노트를 선택하거나 새로 만드세요.</p>
+        <div className="welcome-state">
+          <div className="welcome-icon">🎙️</div>
+          <h2 className="welcome-title">AI 회의록 어시스턴트</h2>
+          <p className="welcome-desc">
+            왼쪽에서 노트를 선택하거나 새로 만드세요.<br />
+            녹음 시작 버튼을 누르면 자동으로 전사·요약합니다.
+          </p>
+        </div>
       </main>
     )
   }
+
+  const summaryContent = note.summary ?? savedDocs['summary'] ?? ''
+  const visibleDoc = activeDocKey ? (savedDocs[activeDocKey] ?? '') : docText
+  const historyKeys = TEMPLATES.filter((t) => savedDocs[t.key])
 
   return (
     <main className="main-panel">
       {generatingDoc && (
         <div className="doc-progress-toast">
           <span className="doc-progress-label">⏳ {generatingLabel} 생성 중...</span>
-          <div className="doc-progress-bar"><div className="doc-progress-fill" style={{ width: `${docProgress}%` }} /></div>
+          <div className="doc-progress-bar">
+            <div className="doc-progress-fill" style={{ width: `${docProgress}%` }} />
+          </div>
         </div>
       )}
+
       <div className="main-header">
-        <h2 className="note-title">{note.title}</h2>
+        <div className="title-row">
+          {editingTitle ? (
+            <input
+              ref={titleInputRef}
+              className="title-edit-input"
+              value={titleDraft}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onBlur={handleTitleSave}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleTitleSave()
+                if (e.key === 'Escape') setEditingTitle(false)
+              }}
+            />
+          ) : (
+            <h2 className="note-title" onClick={handleTitleEdit} title="클릭하여 제목 편집">
+              {note.title}
+              <span className="title-edit-hint">✎</span>
+            </h2>
+          )}
+          <span className="note-date">
+            {new Date(note.updated_at).toLocaleDateString('ko-KR', {
+              month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+            })}
+          </span>
+        </div>
+
         <div className="tab-bar">
-          {(['live', 'script', 'doc'] as Tab[]).map((t) => (
+          {([
+            { key: 'live', label: '전사' },
+            { key: 'summary', label: '요약', badge: summaryLoading ? '...' : undefined },
+            { key: 'script', label: '화자' },
+            { key: 'doc', label: '문서' },
+          ] as { key: Tab; label: string; badge?: string }[]).map((t) => (
             <button
-              key={t}
-              className={`tab-btn ${tab === t ? 'active' : ''}`}
-              onClick={() => setTab(t)}
+              key={t.key}
+              className={`tab-btn ${tab === t.key ? 'active' : ''}`}
+              onClick={() => setTab(t.key)}
             >
-              {t === 'live' ? '대화기록' : t === 'script' ? '화자 스크립트' : '맞춤문서'}
+              {t.label}
+              {t.badge && <span className="tab-badge">{t.badge}</span>}
             </button>
           ))}
         </div>
       </div>
 
       <div className="tab-content">
+        {/* 전사 탭 */}
         {tab === 'live' && (
           <div className="live-tab">
             {liveLines.length === 0 && !note.transcript?.length && (
@@ -184,25 +297,66 @@ export default function MainPanel({ note, liveLines, onRefresh }: Props) {
                 })
               : note.transcript?.map((seg, i) => (
                   <p key={i} className="live-line">
-                    {seg.speaker ? `[${seg.speaker}] ` : ''}{seg.text}
-                    <span className="seg-time" style={{ marginLeft: 8, fontSize: '0.75rem', opacity: 0.5 }}>{seg.time}</span>
+                    <span className="seg-time-inline">{seg.time}</span>
+                    {seg.speaker ? <span className="seg-speaker-inline">{seg.speaker}</span> : null}
+                    {seg.text}
                   </p>
-                ))
-            }
+                ))}
           </div>
         )}
 
+        {/* 요약 탭 */}
+        {tab === 'summary' && (
+          <div className="summary-tab">
+            {summaryLoading && (
+              <div className="summary-loading">
+                <div className="summary-spinner" />
+                <p>AI가 회의 내용을 분석 중입니다...</p>
+              </div>
+            )}
+            {!summaryLoading && !summaryContent && (
+              <div className="summary-empty">
+                <p className="empty-hint">
+                  {note.transcript?.length
+                    ? '아래 버튼을 눌러 요약을 생성하세요.'
+                    : '녹음이 완료되면 자동으로 요약이 생성됩니다.'}
+                </p>
+                {note.transcript?.length ? (
+                  <button className="action-btn" onClick={() => handleGenerate('summary')}>
+                    요약 생성
+                  </button>
+                ) : null}
+              </div>
+            )}
+            {!summaryLoading && summaryContent && (
+              <div className="doc-output-wrap">
+                <div className="doc-actions-row">
+                  <CopyButton text={summaryContent} />
+                  <DownloadButton text={summaryContent} filename={`${note.title}_요약.md`} />
+                  <button className="doc-action-btn" onClick={() => handleGenerate('summary')} disabled={generatingDoc}>
+                    재생성
+                  </button>
+                </div>
+                <div className="doc-output markdown-body">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{summaryContent}</ReactMarkdown>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 화자 스크립트 탭 */}
         {tab === 'script' && (
           <div className="script-tab">
             <div className="script-actions">
-              <button className="action-btn" onClick={handlePostprocess} disabled={loading}>
-                {loading ? '분석 중...' : '화자 분리 후처리 실행'}
+              <button className="action-btn" onClick={handlePostprocess}>
+                화자 분리 실행
               </button>
             </div>
-            {script.length === 0 && (
-              <p className="empty-hint">후처리 실행 시 화자별 스크립트가 표시됩니다.</p>
+            {(note.diarized_script?.length ?? 0) > 0 || script.length > 0 ? null : (
+              <p className="empty-hint">화자 분리를 실행하면 발화자별 스크립트가 표시됩니다.</p>
             )}
-            {script.map((seg, i) => (
+            {(script.length > 0 ? script : (note.diarized_script ?? [])).map((seg, i) => (
               <div key={i} className="script-seg" style={{ borderLeftColor: seg.color }}>
                 <span className="seg-speaker" style={{ color: seg.color }}>
                   {seg.speaker_label ?? seg.speaker}
@@ -214,47 +368,63 @@ export default function MainPanel({ note, liveLines, onRefresh }: Props) {
           </div>
         )}
 
-        {tab === 'doc' && (() => {
-          const visibleDoc = activeDocKey ? (savedDocs[activeDocKey] ?? '') : docText
-          const historyKeys = TEMPLATES.filter((t) => savedDocs[t.key])
-          return (
-            <div className="doc-tab">
-              <div className="template-grid">
-                {TEMPLATES.map((tpl) => (
+        {/* 문서 탭 */}
+        {tab === 'doc' && (
+          <div className="doc-tab">
+            <div className="template-grid">
+              {TEMPLATES.map((tpl) => (
+                <button
+                  key={tpl.key}
+                  className={`tpl-btn ${savedDocs[tpl.key] ? 'has-doc' : ''}`}
+                  onClick={() => {
+                    if (savedDocs[tpl.key] && activeDocKey !== tpl.key) {
+                      setActiveDocKey(tpl.key)
+                    } else {
+                      handleGenerate(tpl.key)
+                    }
+                  }}
+                  disabled={generatingDoc}
+                >
+                  <span className="tpl-icon">{tpl.icon}</span>
+                  <span>{tpl.label}</span>
+                  {savedDocs[tpl.key] && <span className="tpl-dot" />}
+                </button>
+              ))}
+            </div>
+
+            {historyKeys.length > 0 && (
+              <div className="doc-history-bar">
+                <span className="doc-history-label">생성된 문서</span>
+                {historyKeys.map((t) => (
                   <button
-                    key={tpl.key}
-                    className="tpl-btn"
-                    onClick={() => handleGenerate(tpl.key)}
-                    disabled={generatingDoc}
+                    key={t.key}
+                    className={`doc-history-chip ${activeDocKey === t.key ? 'active' : ''}`}
+                    onClick={() => setActiveDocKey(t.key)}
                   >
-                    {tpl.label}
+                    {t.label}
                   </button>
                 ))}
               </div>
-              {historyKeys.length > 0 && (
-                <div className="doc-history-bar">
-                  <span className="doc-history-label">이전 생성</span>
-                  {historyKeys.map((t) => (
-                    <button
-                      key={t.key}
-                      className={`doc-history-chip ${activeDocKey === t.key ? 'active' : ''}`}
-                      onClick={() => setActiveDocKey(t.key)}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
+            )}
+
+            {docError && <p className="doc-error">{docError}</p>}
+
+            {visibleDoc && (
+              <div className="doc-output-wrap">
+                <div className="doc-actions-row">
+                  <CopyButton text={visibleDoc} />
+                  <DownloadButton
+                    text={visibleDoc}
+                    filename={`${note.title}_${TEMPLATES.find(t => t.key === activeDocKey)?.label ?? '문서'}.md`}
+                  />
                 </div>
-              )}
-              {docError && <p className="doc-error">{docError}</p>}
-              {visibleDoc && (
-                <div className="doc-output-wrap">
-                  <button className="doc-download-btn" onClick={handleDownload}>⬇ MD 다운로드</button>
-                  <div className="doc-output">{visibleDoc}</div>
+                <div className="doc-output markdown-body">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{visibleDoc}</ReactMarkdown>
                 </div>
-              )}
-            </div>
-          )
-        })()}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </main>
   )

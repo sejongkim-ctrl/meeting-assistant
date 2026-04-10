@@ -61,3 +61,8 @@ export interface WsMessage {
     wav_path: string | null
   }
 }
+
+export interface ChatMsg {
+  role: 'user' | 'assistant'
+  content: string
+}
