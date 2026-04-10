@@ -62,8 +62,9 @@ export default function App() {
           wav_path: msg.data.wav_path ?? undefined,
         }).then(() => {
           refreshNotes()
-          // Auto-generate summary after saving transcript
           triggerAutoSummary(noteId)
+        }).catch((e) => {
+          console.error('[recording_stopped] updateNote failed:', e)
         })
       }
     }
