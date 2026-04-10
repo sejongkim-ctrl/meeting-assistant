@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 
 export type ToastType = 'success' | 'error' | 'info'
 
@@ -29,6 +29,14 @@ export function useToast() {
     const timer = setTimeout(() => hideToast(id), 3000)
     timersRef.current.set(id, timer)
   }, [hideToast])
+
+  // Cleanup all pending timers on unmount
+  useEffect(() => {
+    return () => {
+      timersRef.current.forEach((timer) => clearTimeout(timer))
+      timersRef.current.clear()
+    }
+  }, [])
 
   return { toasts, showToast, hideToast }
 }

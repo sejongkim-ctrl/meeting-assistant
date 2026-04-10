@@ -53,6 +53,7 @@ export default function SharedView({ token }: Props) {
         summaryJustReady={false}
         onRefresh={() => {}}
         onSummaryRead={() => {}}
+        readOnly
       />
     </div>
   )

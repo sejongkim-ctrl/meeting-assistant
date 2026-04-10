@@ -27,7 +27,7 @@ export const updateNote = (
   data: Partial<Pick<Note, 'title' | 'summary' | 'transcript' | 'diarized_script' | 'wav_path' | 'generated_docs'>>
 ) => req<Note>(`/notes/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 export const deleteNote = (id: number) =>
-  req<{ ok: boolean }>(`/notes/${id}`, { method: 'DELETE' })
+  fetch(`/api/notes/${id}`, { method: 'DELETE' }).then(() => {})
 
 // Recording
 export const startRecording = (noteId: number) =>

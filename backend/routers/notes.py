@@ -109,8 +109,7 @@ async def create_note(body: NoteCreate, db: aiosqlite.Connection = Depends(get_d
         (body.folder_id, body.title, transcript_json, diarized_json, body.summary, body.wav_path, now, now),
     ) as cursor:
         note_id = cursor.lastrowid
-    await db.commit()
-    # FTS sync
+    # FTS sync — commit once after both inserts for atomicity
     transcript_text = ""
     if body.transcript:
         segs = body.transcript if isinstance(body.transcript, list) else []
